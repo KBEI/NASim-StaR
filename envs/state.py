@@ -97,7 +97,7 @@ class State:
         new_tensor = np.copy(self.tensor)
         return State(new_tensor, self.host_num_map)
 
-    def get_initial_observation(self, fully_obs):
+    def get_initial_observation(self, fully_obs, alerts_count=0):
         """Get the initial observation of network.
 
         Returns
@@ -108,6 +108,7 @@ class State:
         obs = Observation(self.shape())
         if fully_obs:
             obs.from_state(self)
+            obs.set_alerts_count(alerts_count)
             return obs
 
         for host_addr, host in self.hosts:
@@ -118,9 +119,11 @@ class State:
                                     discovered=True)
             host_idx = self.get_host_idx(host_addr)
             obs.update_from_host(host_idx, host_obs)
+        obs.set_alerts_count(alerts_count)
         return obs
 
-    def get_observation(self, action, action_result, fully_obs):
+    def get_observation(self, action, action_result, fully_obs,
+                        alerts_count=0):
         """Get observation given last action and action result
 
         Parameters
@@ -139,6 +142,7 @@ class State:
         """
         obs = Observation(self.shape())
         obs.from_action_result(action_result)
+        obs.set_alerts_count(alerts_count)
         if fully_obs:
             obs.from_state(self)
             return obs

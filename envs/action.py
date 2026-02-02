@@ -571,6 +571,8 @@ class ActionResult:
     undefined_error : bool
         True if action failed due to an undefined error (e.g. random exploit
         failure)
+    detected : bool
+        True if action was detected by defender systems
     newly_discovered : dict
         host addresses discovered for the first time by action
     """
@@ -586,6 +588,7 @@ class ActionResult:
                  connection_error=False,
                  permission_error=False,
                  undefined_error=False,
+                 detected=False,
                  newly_discovered=None):
         """
         Parameters
@@ -610,6 +613,8 @@ class ActionResult:
             True if action failed due to a permission error (default=False)
         undefined_error : bool, optional
             True if action failed due to an undefined error (default=False)
+        detected : bool, optional
+            True if action was detected by defender systems (default=False)
         newly_discovered : dict, optional
             host addresses discovered for first time by action (default=None)
         """
@@ -623,6 +628,7 @@ class ActionResult:
         self.connection_error = connection_error
         self.permission_error = permission_error
         self.undefined_error = undefined_error
+        self.detected = detected
         if newly_discovered is not None:
             self.newly_discovered = newly_discovered
         else:
@@ -647,6 +653,7 @@ class ActionResult:
             connection_error=self.connection_error,
             permission_error=self.permission_error,
             undefined_error=self.undefined_error,
+            detected=self.detected,
             newly_discovered=self.newly_discovered
         )
 

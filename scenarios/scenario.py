@@ -24,6 +24,29 @@ class Scenario:
         return self.scenario_dict.get(u.STEP_LIMIT, None)
 
     @property
+    def detection(self):
+        return self.scenario_dict.get(
+            u.DETECTION,
+            {
+                u.DETECTION_ENABLED: False,
+                u.DETECTION_BASE_PROB: {},
+                u.DETECTION_COST_STEALTH_FACTOR: 0.0
+            }
+        )
+
+    @property
+    def detection_enabled(self):
+        return bool(self.detection.get(u.DETECTION_ENABLED, False))
+
+    @property
+    def detection_base_prob(self):
+        return self.detection.get(u.DETECTION_BASE_PROB, {})
+
+    @property
+    def detection_cost_stealth_factor(self):
+        return self.detection.get(u.DETECTION_COST_STEALTH_FACTOR, 0.0)
+
+    @property
     def services(self):
         return self.scenario_dict[u.SERVICES]
 

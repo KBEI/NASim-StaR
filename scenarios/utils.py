@@ -35,6 +35,12 @@ STEP_LIMIT = "step_limit"
 ACCESS_LEVELS = "access_levels"
 ADDRESS_SPACE_BOUNDS = "address_space_bounds"
 
+# detection configuration keys
+DETECTION = "detection"
+DETECTION_ENABLED = "enabled"
+DETECTION_BASE_PROB = "base_prob"
+DETECTION_COST_STEALTH_FACTOR = "cost_stealth_factor"
+
 # scenario exploit keys
 EXPLOIT_SERVICE = "service"
 EXPLOIT_OS = "os"

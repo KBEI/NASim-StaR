@@ -37,6 +37,10 @@ class Observation:
     4. Undefined error - True (1) or False (0)
         indicates whether there was an undefined error or not (e.g. failure due
         to stochastic nature of exploits)
+    5. Detected - True (1) or False (0)
+        indicates whether the action was detected by defender systems
+    6. Alerts count - int
+        total alerts count in current episode
 
     Since the number of features in the auxiliary row is less than the number
     of features in each host row, the remainder of the row is all zeros.
@@ -47,6 +51,8 @@ class Observation:
     _conn_error_idx = _success_idx + 1
     _perm_error_idx = _conn_error_idx + 1
     _undef_error_idx = _perm_error_idx + 1
+    _detected_idx = _undef_error_idx + 1
+    _alerts_count_idx = _detected_idx + 1
 
     def __init__(self, state_shape):
         """
@@ -63,6 +69,10 @@ class Observation:
     def get_space_bounds(scenario):
         value_bounds = scenario.host_value_bounds
         discovery_bounds = scenario.host_discovery_value_bounds
+        if scenario.step_limit is not None:
+            alerts_bound = scenario.step_limit
+        else:
+            alerts_bound = scenario.get_action_space_size()
         obs_low = min(
             0,
             value_bounds[0],
@@ -74,7 +84,8 @@ class Observation:
             discovery_bounds[1],
             AccessLevel.ROOT,
             scenario.address_space_bounds[0],
-            scenario.address_space_bounds[1]
+            scenario.address_space_bounds[1],
+            alerts_bound
         )
         return (obs_low, obs_high)
 
@@ -98,6 +109,11 @@ class Observation:
         self.tensor[self.aux_row][self._perm_error_idx] = perm_err
         undef_err = int(action_result.undefined_error)
         self.tensor[self.aux_row][self._undef_error_idx] = undef_err
+        detected = int(action_result.detected)
+        self.tensor[self.aux_row][self._detected_idx] = detected
+
+    def set_alerts_count(self, alerts_count):
+        self.tensor[self.aux_row][self._alerts_count_idx] = alerts_count
 
     def from_state_and_action(self, state, action_result):
         self.from_state(state)
@@ -149,6 +165,28 @@ class Observation:
             True if there was a undefined error, otherwise False
         """
         return bool(self.tensor[self.aux_row][self._undef_error_idx])
+
+    @property
+    def detected(self):
+        """Whether the action was detected or not
+
+        Returns
+        -------
+        bool
+            True if the action was detected, otherwise False
+        """
+        return bool(self.tensor[self.aux_row][self._detected_idx])
+
+    @property
+    def alerts_count(self):
+        """Current alerts count in the episode
+
+        Returns
+        -------
+        int
+            alerts count
+        """
+        return int(self.tensor[self.aux_row][self._alerts_count_idx])
 
     def shape_flat(self):
         """Get the flat (1D) shape of the Observation.
@@ -210,7 +248,9 @@ class Observation:
             "Success": self.success,
             "Connection Error": self.connection_error,
             "Permission Error": self.permission_error,
-            "Undefined Error": self.undefined_error
+            "Undefined Error": self.undefined_error,
+            "Detected": self.detected,
+            "Alerts Count": self.alerts_count
         }
         return host_obs, aux_obs
 

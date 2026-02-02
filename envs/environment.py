@@ -130,7 +130,7 @@ class NASimEnv(gym.Env):
         self.steps = 0
         self.current_state = self.network.reset(self.current_state)
         self.last_obs = self.current_state.get_initial_observation(
-            self.fully_obs
+            self.fully_obs, self.network.alerts_count
         )
 
         if self.flat_obs:
@@ -221,7 +221,7 @@ class NASimEnv(gym.Env):
             state, action
         )
         obs = next_state.get_observation(
-            action, action_obs, self.fully_obs
+            action, action_obs, self.fully_obs, self.network.alerts_count
         )
         done = self.goal_reached(next_state)
         reward = action_obs.value - action.cost

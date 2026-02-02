@@ -12,6 +12,7 @@ class Network:
     """A computer network """
 
     def __init__(self, scenario):
+        self.scenario = scenario
         self.hosts = scenario.hosts
         self.host_num_map = scenario.host_num_map
         self.subnets = scenario.subnets
@@ -21,9 +22,11 @@ class Network:
         self.address_space_bounds = scenario.address_space_bounds
         self.sensitive_addresses = scenario.sensitive_addresses
         self.sensitive_hosts = scenario.sensitive_hosts
+        self.alerts_count = 0
 
     def reset(self, state):
         """Reset the network state to initial state """
+        self.alerts_count = 0
         next_state = state.copy()
         for host_addr in self.address_space:
             host = next_state.get_host(host_addr)
@@ -88,12 +91,17 @@ class Network:
             return next_state, ActionResult(False, 0.0, undefined_error=True)
 
         if action.is_subnet_scan():
-            return self._perform_subnet_scan(next_state, action)
+            next_state, action_obs = self._perform_subnet_scan(
+                next_state, action
+            )
+            self._apply_detection(action, action_obs)
+            return next_state, action_obs
 
         t_host = state.get_host(action.target)
         next_host_state, action_obs = t_host.perform_action(action)
         next_state.update_host(action.target, next_host_state)
         self._update(next_state, action, action_obs)
+        self._apply_detection(action, action_obs)
         return next_state, action_obs
 
     def _perform_subnet_scan(self, next_state, action):
@@ -127,6 +135,37 @@ class Network:
             newly_discovered=newly_discovered
         )
         return next_state, obs
+
+    def _apply_detection(self, action, action_obs):
+        if not self.scenario.detection_enabled:
+            return
+        if action.is_noop() or not action_obs.success:
+            return
+        base_prob = self._get_detection_base_prob(action)
+        if base_prob <= 0.0:
+            return
+        cost_factor = self.scenario.detection_cost_stealth_factor
+        if cost_factor > 0:
+            base_prob = base_prob / (1.0 + cost_factor * action.cost)
+        if np.random.rand() <= base_prob:
+            action_obs.detected = True
+            self.alerts_count += 1
+
+    def _get_detection_base_prob(self, action):
+        base_prob = self.scenario.detection_base_prob
+        if action.is_service_scan():
+            return base_prob.get("service_scan", 0.0)
+        if action.is_os_scan():
+            return base_prob.get("os_scan", 0.0)
+        if action.is_subnet_scan():
+            return base_prob.get("subnet_scan", 0.0)
+        if action.is_process_scan():
+            return base_prob.get("process_scan", 0.0)
+        if action.is_exploit():
+            return base_prob.get("exploit", 0.0)
+        if action.is_privilege_escalation():
+            return base_prob.get("privilege_escalation", 0.0)
+        return 0.0
 
     def _update(self, state, action, action_obs):
         if action.is_exploit() and action_obs.success:

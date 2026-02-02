@@ -26,7 +26,10 @@ VALID_CONFIG_KEYS = {
     u.FIREWALL: dict
 }
 
-OPTIONAL_CONFIG_KEYS = {u.STEP_LIMIT: int}
+OPTIONAL_CONFIG_KEYS = {
+    u.STEP_LIMIT: int,
+    u.DETECTION: dict
+}
 
 VALID_ACCESS_VALUES = ["user", "root", u.USER_ACCESS, u.ROOT_ACCESS]
 ACCESS_LEVEL_MAP = {
@@ -103,6 +106,7 @@ class ScenarioLoader:
         self._parse_firewall()
         self._parse_hosts()
         self._parse_step_limit()
+        self._parse_detection()
         return self._construct_scenario()
 
     def _construct_scenario(self):
@@ -122,6 +126,7 @@ class ScenarioLoader:
         scenario_dict[u.FIREWALL] = self.firewall
         scenario_dict[u.HOSTS] = self.hosts
         scenario_dict[u.STEP_LIMIT] = self.step_limit
+        scenario_dict[u.DETECTION] = self.detection
         return Scenario(
             scenario_dict, name=self.name, generated=False
         )
@@ -583,3 +588,48 @@ class ScenarioLoader:
                 f"Step limit must be positive int: {step_limit} is invalid"
 
         self.step_limit = step_limit
+
+    def _parse_detection(self):
+        detection = self.yaml_dict.get(u.DETECTION, None)
+        if detection is None:
+            self.detection = {
+                u.DETECTION_ENABLED: False,
+                u.DETECTION_BASE_PROB: {},
+                u.DETECTION_COST_STEALTH_FACTOR: 0.0
+            }
+            return
+        self._validate_detection(detection)
+        self.detection = detection
+
+    def _validate_detection(self, detection):
+        assert isinstance(detection, dict), \
+            f"{u.DETECTION} must be a dict"
+        enabled = detection.get(u.DETECTION_ENABLED, False)
+        assert isinstance(enabled, bool), \
+            f"{u.DETECTION_ENABLED} must be bool"
+
+        base_prob = detection.get(u.DETECTION_BASE_PROB, {})
+        assert isinstance(base_prob, dict), \
+            f"{u.DETECTION_BASE_PROB} must be a dict"
+        valid_action_types = {
+            "service_scan",
+            "os_scan",
+            "subnet_scan",
+            "process_scan",
+            "exploit",
+            "privilege_escalation"
+        }
+        for action_type, prob in base_prob.items():
+            assert action_type in valid_action_types, \
+                (f"Invalid detection action type: {action_type}. "
+                 f"Must be one of {sorted(valid_action_types)}")
+            assert isinstance(prob, (int, float)), \
+                f"Detection base_prob for {action_type} must be numeric"
+            assert 0.0 <= prob <= 1.0, \
+                f"Detection base_prob for {action_type} must be [0, 1]"
+
+        cost_factor = detection.get(u.DETECTION_COST_STEALTH_FACTOR, 0.0)
+        assert isinstance(cost_factor, (int, float)), \
+            f"{u.DETECTION_COST_STEALTH_FACTOR} must be numeric"
+        assert cost_factor >= 0.0, \
+            f"{u.DETECTION_COST_STEALTH_FACTOR} must be >= 0"
