@@ -2,6 +2,7 @@ import numpy as np
 
 from nasim.envs.action import ActionResult
 from nasim.envs.utils import get_minimal_hops_to_goal, min_subnet_depth, AccessLevel
+import nasim.scenarios.utils as u
 
 # column in topology adjacency matrix that represents connection between
 # subnet and public
@@ -23,10 +24,20 @@ class Network:
         self.sensitive_addresses = scenario.sensitive_addresses
         self.sensitive_hosts = scenario.sensitive_hosts
         self.alerts_count = 0
+        self.isolated_hosts = set()
+        self.monitoring_level = 1.0
+        self.monitoring_steps_left = 0
+        self.firewall_overrides = {}
+        self.last_alert_host = None
 
     def reset(self, state):
         """Reset the network state to initial state """
         self.alerts_count = 0
+        self.isolated_hosts = set()
+        self.monitoring_level = 1.0
+        self.monitoring_steps_left = 0
+        self.firewall_overrides = {}
+        self.last_alert_host = None
         next_state = state.copy()
         for host_addr in self.address_space:
             host = next_state.get_host(host_addr)
@@ -61,6 +72,10 @@ class Network:
 
         if action.is_noop():
             return next_state, ActionResult(True)
+
+        if action.target in self.isolated_hosts:
+            result = ActionResult(False, 0.0, connection_error=True)
+            return next_state, result
 
         if not state.host_reachable(action.target) \
            or not state.host_discovered(action.target):
@@ -141,17 +156,33 @@ class Network:
             return
         if action.is_noop() or not action_obs.success:
             return
-        base_prob = self._get_detection_base_prob(action)
+        honeypot_cfg = self._get_honeypot_config(action.target)
+        if honeypot_cfg is not None and honeypot_cfg.get(
+                u.HONEYPOT_FORCE_DETECTED, False
+        ):
+            self._record_detection(action, action_obs, honeypot_cfg)
+            return
+
+        base_prob = self._get_detection_base_prob(action, honeypot_cfg)
         if base_prob <= 0.0:
             return
+        if self.monitoring_level > 1.0:
+            base_prob = min(1.0, base_prob * self.monitoring_level)
         cost_factor = self.scenario.detection_cost_stealth_factor
         if cost_factor > 0:
             base_prob = base_prob / (1.0 + cost_factor * action.cost)
         if np.random.rand() <= base_prob:
-            action_obs.detected = True
-            self.alerts_count += 1
+            self._record_detection(action, action_obs, honeypot_cfg)
 
-    def _get_detection_base_prob(self, action):
+    def _record_detection(self, action, action_obs, honeypot_cfg):
+        action_obs.detected = True
+        self.alerts_count += 1
+        self.last_alert_host = action.target
+        self._maybe_trigger_response(action, action_obs, honeypot_cfg)
+
+    def _get_detection_base_prob(self, action, honeypot_cfg=None):
+        if honeypot_cfg is not None and u.HONEYPOT_DETECTION_PROB in honeypot_cfg:
+            return honeypot_cfg[u.HONEYPOT_DETECTION_PROB]
         base_prob = self.scenario.detection_base_prob
         if action.is_service_scan():
             return base_prob.get("service_scan", 0.0)
@@ -166,6 +197,59 @@ class Network:
         if action.is_privilege_escalation():
             return base_prob.get("privilege_escalation", 0.0)
         return 0.0
+
+    def _maybe_trigger_response(self, action, action_obs, honeypot_cfg):
+        if not self.scenario.response_enabled:
+            return
+        threshold_reached = (
+            self.alerts_count >= self.scenario.response_alert_threshold
+        )
+        honeypot_trigger = (
+            honeypot_cfg is not None
+            and honeypot_cfg.get(u.HONEYPOT_TRIGGER_RESPONSE, False)
+        )
+        if not (threshold_reached or honeypot_trigger):
+            return
+        self._apply_response_actions()
+
+    def _apply_response_actions(self):
+        for action in self.scenario.response_actions:
+            action_type = action.get(u.RESPONSE_ACTION_TYPE)
+            if action_type == u.RESPONSE_ACTION_ISOLATE_HOST:
+                if self.last_alert_host is not None:
+                    self.isolated_hosts.add(self.last_alert_host)
+            elif action_type == u.RESPONSE_ACTION_TIGHTEN_FIREWALL:
+                connections = action.get(u.RESPONSE_FIREWALL_CONNECTIONS, {})
+                for conn, remove_services in connections.items():
+                    current = list(self._get_firewall_allowed(*conn))
+                    updated = [s for s in current if s not in remove_services]
+                    self.firewall_overrides[conn] = updated
+            elif action_type == u.RESPONSE_ACTION_INCREASE_MONITORING:
+                factor = action.get(u.RESPONSE_MONITORING_FACTOR, 1.0)
+                steps = action.get(u.RESPONSE_MONITORING_STEPS, 1)
+                if factor > self.monitoring_level:
+                    self.monitoring_level = factor
+                self.monitoring_steps_left = max(
+                    self.monitoring_steps_left, steps
+                )
+
+    def tick_monitoring(self):
+        if self.monitoring_steps_left > 0:
+            self.monitoring_steps_left -= 1
+            if self.monitoring_steps_left <= 0:
+                self.monitoring_level = 1.0
+
+    def under_increased_monitoring(self):
+        return self.monitoring_steps_left > 0
+
+    def any_sensitive_isolated(self):
+        for addr in self.sensitive_addresses:
+            if addr in self.isolated_hosts:
+                return True
+        return False
+
+    def _get_honeypot_config(self, host_addr):
+        return self.scenario.honeypots.get(host_addr)
 
     def _update(self, state, action, action_obs):
         if action.is_exploit() and action_obs.success:
@@ -197,7 +281,13 @@ class Network:
             return True
         if not self.subnets_connected(src_subnet, dest_subnet):
             return False
-        return service in self.firewall[(src_subnet, dest_subnet)]
+        return service in self._get_firewall_allowed(src_subnet, dest_subnet)
+
+    def _get_firewall_allowed(self, src_subnet, dest_subnet):
+        key = (src_subnet, dest_subnet)
+        if key in self.firewall_overrides:
+            return self.firewall_overrides[key]
+        return self.firewall[key]
 
     def host_traffic_permitted(self, src_addr, dest_addr, service):
         dest_host = self.hosts[dest_addr]

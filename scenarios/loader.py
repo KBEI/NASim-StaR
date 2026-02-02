@@ -28,7 +28,11 @@ VALID_CONFIG_KEYS = {
 
 OPTIONAL_CONFIG_KEYS = {
     u.STEP_LIMIT: int,
-    u.DETECTION: dict
+    u.DETECTION: dict,
+    u.RESPONSE: dict,
+    u.HONEYPOTS: dict,
+    u.REWARDS: dict,
+    u.TIME: dict
 }
 
 VALID_ACCESS_VALUES = ["user", "root", u.USER_ACCESS, u.ROOT_ACCESS]
@@ -107,6 +111,10 @@ class ScenarioLoader:
         self._parse_hosts()
         self._parse_step_limit()
         self._parse_detection()
+        self._parse_response()
+        self._parse_honeypots()
+        self._parse_rewards()
+        self._parse_time()
         return self._construct_scenario()
 
     def _construct_scenario(self):
@@ -127,6 +135,10 @@ class ScenarioLoader:
         scenario_dict[u.HOSTS] = self.hosts
         scenario_dict[u.STEP_LIMIT] = self.step_limit
         scenario_dict[u.DETECTION] = self.detection
+        scenario_dict[u.RESPONSE] = self.response
+        scenario_dict[u.HONEYPOTS] = self.honeypots
+        scenario_dict[u.REWARDS] = self.rewards
+        scenario_dict[u.TIME] = self.time
         return Scenario(
             scenario_dict, name=self.name, generated=False
         )
@@ -633,3 +645,214 @@ class ScenarioLoader:
             f"{u.DETECTION_COST_STEALTH_FACTOR} must be numeric"
         assert cost_factor >= 0.0, \
             f"{u.DETECTION_COST_STEALTH_FACTOR} must be >= 0"
+
+    def _parse_response(self):
+        response = self.yaml_dict.get(u.RESPONSE, None)
+        if response is None:
+            self.response = {
+                u.RESPONSE_ENABLED: False,
+                u.RESPONSE_ALERT_THRESHOLD: 1,
+                u.RESPONSE_ACTIONS: []
+            }
+            return
+        self._validate_response(response)
+        self.response = self._normalize_response(response)
+
+    def _validate_response(self, response):
+        assert isinstance(response, dict), \
+            f"{u.RESPONSE} must be a dict"
+        enabled = response.get(u.RESPONSE_ENABLED, True)
+        assert isinstance(enabled, bool), \
+            f"{u.RESPONSE_ENABLED} must be bool"
+
+        threshold = response.get(u.RESPONSE_ALERT_THRESHOLD, 1)
+        assert isinstance(threshold, int) and threshold >= 1, \
+            f"{u.RESPONSE_ALERT_THRESHOLD} must be int >= 1"
+
+        actions = response.get(u.RESPONSE_ACTIONS, [])
+        assert isinstance(actions, list), \
+            f"{u.RESPONSE_ACTIONS} must be a list"
+        if u.RESPONSE_SENSITIVE_ISOLATED_FAILURE in response:
+            fail_on_isolated = response[u.RESPONSE_SENSITIVE_ISOLATED_FAILURE]
+            assert isinstance(fail_on_isolated, bool), \
+                f"{u.RESPONSE_SENSITIVE_ISOLATED_FAILURE} must be bool"
+        valid_types = {
+            u.RESPONSE_ACTION_ISOLATE_HOST,
+            u.RESPONSE_ACTION_TIGHTEN_FIREWALL,
+            u.RESPONSE_ACTION_INCREASE_MONITORING
+        }
+        for action in actions:
+            assert isinstance(action, dict), \
+                "Each response action must be a dict"
+            assert u.RESPONSE_ACTION_TYPE in action, \
+                f"Response action missing '{u.RESPONSE_ACTION_TYPE}'"
+            action_type = action[u.RESPONSE_ACTION_TYPE]
+            assert action_type in valid_types, \
+                (f"Invalid response action type: {action_type}. "
+                 f"Must be one of {sorted(valid_types)}")
+
+            if action_type == u.RESPONSE_ACTION_TIGHTEN_FIREWALL:
+                connections = action.get(u.RESPONSE_FIREWALL_CONNECTIONS, {})
+                assert isinstance(connections, dict), \
+                    f"{u.RESPONSE_FIREWALL_CONNECTIONS} must be a dict"
+                for conn, services in connections.items():
+                    self._validate_subnet_connection(conn, "Response firewall")
+                    assert self._is_valid_firewall_setting(services), \
+                        (f"Invalid firewall services list: {services}")
+
+            if action_type == u.RESPONSE_ACTION_INCREASE_MONITORING:
+                factor = action.get(u.RESPONSE_MONITORING_FACTOR, 1.0)
+                steps = action.get(u.RESPONSE_MONITORING_STEPS, 1)
+                assert isinstance(factor, (int, float)) and factor >= 1.0, \
+                    f"{u.RESPONSE_MONITORING_FACTOR} must be >= 1.0"
+                assert isinstance(steps, int) and steps >= 1, \
+                    f"{u.RESPONSE_MONITORING_STEPS} must be int >= 1"
+
+    def _normalize_response(self, response):
+        normalized = dict(response)
+        actions = []
+        for action in response.get(u.RESPONSE_ACTIONS, []):
+            action_copy = dict(action)
+            if action_copy.get(u.RESPONSE_ACTION_TYPE) \
+               == u.RESPONSE_ACTION_TIGHTEN_FIREWALL:
+                connections = action_copy.get(
+                    u.RESPONSE_FIREWALL_CONNECTIONS, {}
+                )
+                parsed = {}
+                for conn, services in connections.items():
+                    parsed[eval(conn)] = list(services)
+                action_copy[u.RESPONSE_FIREWALL_CONNECTIONS] = parsed
+            actions.append(action_copy)
+        normalized[u.RESPONSE_ACTIONS] = actions
+        return normalized
+
+    def _validate_subnet_connection(self, conn, err_prefix=""):
+        try:
+            conn_tuple = eval(conn)
+        except Exception:
+            raise AssertionError(
+                f"{err_prefix} connection invalid: {conn}"
+            )
+        assert isinstance(conn_tuple, tuple) and len(conn_tuple) == 2 \
+            and all(isinstance(a, int) for a in conn_tuple), \
+            f"{err_prefix} connection must be (subnet, subnet)"
+        src, dest = conn_tuple
+        assert 0 <= src < len(self.subnets), \
+            f"{err_prefix} src subnet out of range: {src}"
+        assert 0 <= dest < len(self.subnets), \
+            f"{err_prefix} dest subnet out of range: {dest}"
+
+    def _parse_honeypots(self):
+        honeypots = self.yaml_dict.get(u.HONEYPOTS, None)
+        if honeypots is None:
+            self.honeypots = {}
+            return
+        self._validate_honeypots(honeypots)
+        parsed = {}
+        for addr, cfg in honeypots.items():
+            addr_tuple = eval(addr)
+            parsed[addr_tuple] = cfg
+        self.honeypots = parsed
+
+    def _validate_honeypots(self, honeypots):
+        assert isinstance(honeypots, dict), \
+            f"{u.HONEYPOTS} must be a dict"
+        for addr, cfg in honeypots.items():
+            self._validate_host_address(addr, "Honeypot")
+            assert isinstance(cfg, dict), \
+                "Honeypot config must be a dict"
+
+            if u.HONEYPOT_DETECTION_PROB in cfg:
+                prob = cfg[u.HONEYPOT_DETECTION_PROB]
+                assert isinstance(prob, (int, float)) and 0.0 <= prob <= 1.0, \
+                    f"{u.HONEYPOT_DETECTION_PROB} must be in [0,1]"
+
+            if u.HONEYPOT_FORCE_DETECTED in cfg:
+                force = cfg[u.HONEYPOT_FORCE_DETECTED]
+                assert isinstance(force, bool), \
+                    f"{u.HONEYPOT_FORCE_DETECTED} must be bool"
+
+            if u.HONEYPOT_TRIGGER_RESPONSE in cfg:
+                trigger = cfg[u.HONEYPOT_TRIGGER_RESPONSE]
+                assert isinstance(trigger, bool), \
+                    f"{u.HONEYPOT_TRIGGER_RESPONSE} must be bool"
+
+            if u.HONEYPOT_FAKE_SERVICES in cfg:
+                fake_services = cfg[u.HONEYPOT_FAKE_SERVICES]
+                assert isinstance(fake_services, list), \
+                    f"{u.HONEYPOT_FAKE_SERVICES} must be a list"
+                for srv in fake_services:
+                    assert srv in self.services, \
+                        f"Invalid fake service: {srv}"
+
+            if u.HONEYPOT_FAKE_OS in cfg:
+                fake_os = cfg[u.HONEYPOT_FAKE_OS]
+                assert isinstance(fake_os, str), \
+                    f"{u.HONEYPOT_FAKE_OS} must be a string"
+                assert fake_os in self.os, \
+                    f"Invalid fake OS: {fake_os}"
+
+    def _parse_rewards(self):
+        rewards = self.yaml_dict.get(u.REWARDS, None)
+        if rewards is None:
+            self.rewards = {
+                u.REWARD_ALERT_PENALTY: 0.0,
+                u.REWARD_SENSITIVE_ISOLATED_PENALTY: 0.0
+            }
+            return
+        self._validate_rewards(rewards)
+        self.rewards = rewards
+
+    def _validate_rewards(self, rewards):
+        assert isinstance(rewards, dict), \
+            f"{u.REWARDS} must be a dict"
+        if u.REWARD_ALERT_PENALTY in rewards:
+            alert_penalty = rewards[u.REWARD_ALERT_PENALTY]
+            assert isinstance(alert_penalty, (int, float)), \
+                f"{u.REWARD_ALERT_PENALTY} must be numeric"
+        if u.REWARD_SENSITIVE_ISOLATED_PENALTY in rewards:
+            isolate_penalty = rewards[u.REWARD_SENSITIVE_ISOLATED_PENALTY]
+            assert isinstance(isolate_penalty, (int, float)), \
+                f"{u.REWARD_SENSITIVE_ISOLATED_PENALTY} must be numeric"
+
+    def _parse_time(self):
+        time_cfg = self.yaml_dict.get(u.TIME, None)
+        if time_cfg is None:
+            self.time = {
+                u.TIME_ENABLED: False,
+                u.TIME_MAX: None,
+                u.ACTION_DURATION: {}
+            }
+            return
+        self._validate_time(time_cfg)
+        self.time = time_cfg
+
+    def _validate_time(self, time_cfg):
+        assert isinstance(time_cfg, dict), \
+            f"{u.TIME} must be a dict"
+        enabled = time_cfg.get(u.TIME_ENABLED, False)
+        assert isinstance(enabled, bool), \
+            f"{u.TIME_ENABLED} must be bool"
+
+        max_time = time_cfg.get(u.TIME_MAX, None)
+        if max_time is not None:
+            assert isinstance(max_time, int) and max_time > 0, \
+                f"{u.TIME_MAX} must be int > 0"
+
+        action_duration = time_cfg.get(u.ACTION_DURATION, {})
+        assert isinstance(action_duration, dict), \
+            f"{u.ACTION_DURATION} must be a dict"
+        valid_actions = {
+            "service_scan",
+            "os_scan",
+            "subnet_scan",
+            "process_scan",
+            "exploit",
+            "privilege_escalation"
+        }
+        for action_type, duration in action_duration.items():
+            assert action_type in valid_actions, \
+                (f"Invalid action_duration key: {action_type}. "
+                 f"Must be one of {sorted(valid_actions)}")
+            assert isinstance(duration, int) and duration > 0, \
+                f"Duration for {action_type} must be int > 0"

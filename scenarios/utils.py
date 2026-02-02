@@ -35,11 +35,45 @@ STEP_LIMIT = "step_limit"
 ACCESS_LEVELS = "access_levels"
 ADDRESS_SPACE_BOUNDS = "address_space_bounds"
 
+# time configuration keys
+TIME = "time"
+TIME_ENABLED = "enabled"
+TIME_MAX = "max_time"
+ACTION_DURATION = "action_duration"
+
 # detection configuration keys
 DETECTION = "detection"
 DETECTION_ENABLED = "enabled"
 DETECTION_BASE_PROB = "base_prob"
 DETECTION_COST_STEALTH_FACTOR = "cost_stealth_factor"
+
+# response configuration keys
+RESPONSE = "response"
+RESPONSE_ENABLED = "enabled"
+RESPONSE_ALERT_THRESHOLD = "alert_threshold"
+RESPONSE_ACTIONS = "actions"
+RESPONSE_ACTION_TYPE = "type"
+RESPONSE_ACTION_ISOLATE_HOST = "isolate_host"
+RESPONSE_ACTION_TIGHTEN_FIREWALL = "tighten_firewall"
+RESPONSE_ACTION_INCREASE_MONITORING = "increase_monitoring"
+RESPONSE_FIREWALL_CONNECTIONS = "connections"
+RESPONSE_FIREWALL_REMOVE_SERVICES = "remove_services"
+RESPONSE_MONITORING_FACTOR = "factor"
+RESPONSE_MONITORING_STEPS = "duration_steps"
+RESPONSE_SENSITIVE_ISOLATED_FAILURE = "sensitive_isolated_failure"
+
+# honeypot configuration keys
+HONEYPOTS = "honeypots"
+HONEYPOT_DETECTION_PROB = "detection_prob"
+HONEYPOT_FORCE_DETECTED = "force_detected"
+HONEYPOT_FAKE_SERVICES = "fake_services"
+HONEYPOT_FAKE_OS = "fake_os"
+HONEYPOT_TRIGGER_RESPONSE = "trigger_response"
+
+# reward configuration keys
+REWARDS = "rewards"
+REWARD_ALERT_PENALTY = "alert_penalty"
+REWARD_SENSITIVE_ISOLATED_PENALTY = "sensitive_isolated_penalty"
 
 # scenario exploit keys
 EXPLOIT_SERVICE = "service"

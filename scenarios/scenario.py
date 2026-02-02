@@ -47,6 +47,82 @@ class Scenario:
         return self.detection.get(u.DETECTION_COST_STEALTH_FACTOR, 0.0)
 
     @property
+    def response(self):
+        return self.scenario_dict.get(
+            u.RESPONSE,
+            {
+                u.RESPONSE_ENABLED: False,
+                u.RESPONSE_ALERT_THRESHOLD: 1,
+                u.RESPONSE_ACTIONS: []
+            }
+        )
+
+    @property
+    def response_enabled(self):
+        return bool(self.response.get(u.RESPONSE_ENABLED, False))
+
+    @property
+    def response_alert_threshold(self):
+        return int(self.response.get(u.RESPONSE_ALERT_THRESHOLD, 1))
+
+    @property
+    def response_actions(self):
+        return self.response.get(u.RESPONSE_ACTIONS, [])
+
+    @property
+    def response_sensitive_isolated_failure(self):
+        return bool(
+            self.response.get(u.RESPONSE_SENSITIVE_ISOLATED_FAILURE, False)
+        )
+
+    @property
+    def honeypots(self):
+        return self.scenario_dict.get(u.HONEYPOTS, {})
+
+    @property
+    def rewards(self):
+        return self.scenario_dict.get(
+            u.REWARDS,
+            {
+                u.REWARD_ALERT_PENALTY: 0.0,
+                u.REWARD_SENSITIVE_ISOLATED_PENALTY: 0.0
+            }
+        )
+
+    @property
+    def reward_alert_penalty(self):
+        return float(self.rewards.get(u.REWARD_ALERT_PENALTY, 0.0))
+
+    @property
+    def reward_sensitive_isolated_penalty(self):
+        return float(
+            self.rewards.get(u.REWARD_SENSITIVE_ISOLATED_PENALTY, 0.0)
+        )
+
+    @property
+    def time(self):
+        return self.scenario_dict.get(
+            u.TIME,
+            {
+                u.TIME_ENABLED: False,
+                u.TIME_MAX: None,
+                u.ACTION_DURATION: {}
+            }
+        )
+
+    @property
+    def time_enabled(self):
+        return bool(self.time.get(u.TIME_ENABLED, False))
+
+    @property
+    def time_max(self):
+        return self.time.get(u.TIME_MAX, None)
+
+    @property
+    def action_duration_map(self):
+        return self.time.get(u.ACTION_DURATION, {})
+
+    @property
     def services(self):
         return self.scenario_dict[u.SERVICES]
 

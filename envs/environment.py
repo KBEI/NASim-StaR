@@ -88,6 +88,7 @@ class NASimEnv(gym.Env):
 
         self.network = Network(scenario)
         self.current_state = State.generate_initial_state(self.network)
+        self.current_time = 0
         self._renderer = None
         self.reset()
 
@@ -129,8 +130,14 @@ class NASimEnv(gym.Env):
         super().reset(seed=seed, options=options)
         self.steps = 0
         self.current_state = self.network.reset(self.current_state)
+        self.current_time = 0
+        remaining_time = self._get_remaining_time()
         self.last_obs = self.current_state.get_initial_observation(
-            self.fully_obs, self.network.alerts_count
+            self.fully_obs,
+            self.network.alerts_count,
+            self.network.under_increased_monitoring(),
+            self.current_time,
+            remaining_time
         )
 
         if self.flat_obs:
@@ -186,7 +193,13 @@ class NASimEnv(gym.Env):
             and self.steps >= self.scenario.step_limit
         )
 
-        return obs, reward, done, step_limit_reached, info
+        time_limit_reached = (
+            self.scenario.time_enabled
+            and self.scenario.time_max is not None
+            and self.current_time >= self.scenario.time_max
+        )
+
+        return obs, reward, done, step_limit_reached or time_limit_reached, info
 
     def generative_step(self, state, action):
         """Run one step of the environment using action in given state.
@@ -220,12 +233,54 @@ class NASimEnv(gym.Env):
         next_state, action_obs = self.network.perform_action(
             state, action
         )
+        if self.scenario.time_enabled:
+            self.current_time += 1 + self._get_action_duration(action)
+        remaining_time = self._get_remaining_time()
+        under_monitoring = self.network.under_increased_monitoring()
         obs = next_state.get_observation(
-            action, action_obs, self.fully_obs, self.network.alerts_count
+            action,
+            action_obs,
+            self.fully_obs,
+            self.network.alerts_count,
+            under_monitoring,
+            self.current_time,
+            remaining_time,
+            self.scenario.honeypots
         )
+        self.network.tick_monitoring()
         done = self.goal_reached(next_state)
         reward = action_obs.value - action.cost
+        if action_obs.detected and self.scenario.reward_alert_penalty != 0.0:
+            reward += self.scenario.reward_alert_penalty
+        sensitive_isolated = self.network.any_sensitive_isolated()
+        if sensitive_isolated and self.scenario.reward_sensitive_isolated_penalty != 0.0:
+            reward += self.scenario.reward_sensitive_isolated_penalty
+        if sensitive_isolated and self.scenario.response_sensitive_isolated_failure:
+            done = True
         return next_state, obs, reward, done, action_obs.info()
+
+    def _get_action_duration(self, action):
+        duration_map = self.scenario.action_duration_map
+        if action.is_service_scan():
+            return duration_map.get("service_scan", 1)
+        if action.is_os_scan():
+            return duration_map.get("os_scan", 1)
+        if action.is_subnet_scan():
+            return duration_map.get("subnet_scan", 1)
+        if action.is_process_scan():
+            return duration_map.get("process_scan", 1)
+        if action.is_exploit():
+            return duration_map.get("exploit", 1)
+        if action.is_privilege_escalation():
+            return duration_map.get("privilege_escalation", 1)
+        return 1
+
+    def _get_remaining_time(self):
+        if not self.scenario.time_enabled:
+            return 0
+        if self.scenario.time_max is None:
+            return 0
+        return max(0, self.scenario.time_max - self.current_time)
 
     def generate_random_initial_state(self):
         """Generates a random initial state for environment.

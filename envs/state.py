@@ -1,5 +1,6 @@
 import numpy as np
 
+import nasim.scenarios.utils as u
 from nasim.envs.host_vector import HostVector
 from nasim.envs.observation import Observation
 
@@ -97,7 +98,10 @@ class State:
         new_tensor = np.copy(self.tensor)
         return State(new_tensor, self.host_num_map)
 
-    def get_initial_observation(self, fully_obs, alerts_count=0):
+    def get_initial_observation(self, fully_obs, alerts_count=0,
+                                under_monitoring=False,
+                                current_time=0,
+                                remaining_time=0):
         """Get the initial observation of network.
 
         Returns
@@ -109,6 +113,8 @@ class State:
         if fully_obs:
             obs.from_state(self)
             obs.set_alerts_count(alerts_count)
+            obs.set_under_monitoring(under_monitoring)
+            obs.set_time(current_time, remaining_time)
             return obs
 
         for host_addr, host in self.hosts:
@@ -120,10 +126,14 @@ class State:
             host_idx = self.get_host_idx(host_addr)
             obs.update_from_host(host_idx, host_obs)
         obs.set_alerts_count(alerts_count)
+        obs.set_under_monitoring(under_monitoring)
+        obs.set_time(current_time, remaining_time)
         return obs
 
     def get_observation(self, action, action_result, fully_obs,
-                        alerts_count=0):
+                        alerts_count=0, under_monitoring=False,
+                        current_time=0, remaining_time=0,
+                        honeypots=None):
         """Get observation given last action and action result
 
         Parameters
@@ -143,6 +153,8 @@ class State:
         obs = Observation(self.shape())
         obs.from_action_result(action_result)
         obs.set_alerts_count(alerts_count)
+        obs.set_under_monitoring(under_monitoring)
+        obs.set_time(current_time, remaining_time)
         if fully_obs:
             obs.from_state(self)
             return obs
@@ -200,6 +212,21 @@ class State:
         else:
             raise NotImplementedError(f"Action {action} not implemented")
         target_obs = t_host.observe(**obs_kwargs)
+        if honeypots is not None and action.target in honeypots:
+            cfg = honeypots[action.target]
+            if action.is_service_scan() and u.HONEYPOT_FAKE_SERVICES in cfg:
+                fake_services = cfg[u.HONEYPOT_FAKE_SERVICES]
+                svc_slice = HostVector._service_idx_slice()
+                target_obs[svc_slice] = 0
+                for srv in fake_services:
+                    srv_num = HostVector.service_idx_map[srv]
+                    target_obs[HostVector._get_service_idx(srv_num)] = 1
+            if action.is_os_scan() and u.HONEYPOT_FAKE_OS in cfg:
+                fake_os = cfg[u.HONEYPOT_FAKE_OS]
+                os_slice = HostVector._os_idx_slice()
+                target_obs[os_slice] = 0
+                os_num = HostVector.os_idx_map[fake_os]
+                target_obs[HostVector._get_os_idx(os_num)] = 1
         obs.update_from_host(t_idx, target_obs)
         return obs
 

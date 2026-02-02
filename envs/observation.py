@@ -41,6 +41,12 @@ class Observation:
         indicates whether the action was detected by defender systems
     6. Alerts count - int
         total alerts count in current episode
+    7. Under increased monitoring - True (1) or False (0)
+        indicates whether defender monitoring is increased
+    8. Current time - int
+        current accumulated time in episode
+    9. Remaining time - int
+        remaining time before max_time is reached
 
     Since the number of features in the auxiliary row is less than the number
     of features in each host row, the remainder of the row is all zeros.
@@ -53,6 +59,9 @@ class Observation:
     _undef_error_idx = _perm_error_idx + 1
     _detected_idx = _undef_error_idx + 1
     _alerts_count_idx = _detected_idx + 1
+    _monitoring_idx = _alerts_count_idx + 1
+    _current_time_idx = _monitoring_idx + 1
+    _remaining_time_idx = _current_time_idx + 1
 
     def __init__(self, state_shape):
         """
@@ -73,6 +82,10 @@ class Observation:
             alerts_bound = scenario.step_limit
         else:
             alerts_bound = scenario.get_action_space_size()
+        if scenario.time_enabled and scenario.time_max is not None:
+            time_bound = scenario.time_max
+        else:
+            time_bound = alerts_bound
         obs_low = min(
             0,
             value_bounds[0],
@@ -85,7 +98,8 @@ class Observation:
             AccessLevel.ROOT,
             scenario.address_space_bounds[0],
             scenario.address_space_bounds[1],
-            alerts_bound
+            alerts_bound,
+            time_bound
         )
         return (obs_low, obs_high)
 
@@ -114,6 +128,13 @@ class Observation:
 
     def set_alerts_count(self, alerts_count):
         self.tensor[self.aux_row][self._alerts_count_idx] = alerts_count
+
+    def set_under_monitoring(self, under_monitoring):
+        self.tensor[self.aux_row][self._monitoring_idx] = int(under_monitoring)
+
+    def set_time(self, current_time, remaining_time):
+        self.tensor[self.aux_row][self._current_time_idx] = current_time
+        self.tensor[self.aux_row][self._remaining_time_idx] = remaining_time
 
     def from_state_and_action(self, state, action_result):
         self.from_state(state)
@@ -188,6 +209,39 @@ class Observation:
         """
         return int(self.tensor[self.aux_row][self._alerts_count_idx])
 
+    @property
+    def under_monitoring(self):
+        """Whether increased monitoring is active
+
+        Returns
+        -------
+        bool
+            True if under increased monitoring, otherwise False
+        """
+        return bool(self.tensor[self.aux_row][self._monitoring_idx])
+
+    @property
+    def current_time(self):
+        """Current accumulated time in episode
+
+        Returns
+        -------
+        int
+            current time
+        """
+        return int(self.tensor[self.aux_row][self._current_time_idx])
+
+    @property
+    def remaining_time(self):
+        """Remaining time before max_time is reached
+
+        Returns
+        -------
+        int
+            remaining time
+        """
+        return int(self.tensor[self.aux_row][self._remaining_time_idx])
+
     def shape_flat(self):
         """Get the flat (1D) shape of the Observation.
 
@@ -250,7 +304,10 @@ class Observation:
             "Permission Error": self.permission_error,
             "Undefined Error": self.undefined_error,
             "Detected": self.detected,
-            "Alerts Count": self.alerts_count
+            "Alerts Count": self.alerts_count,
+            "Under Monitoring": self.under_monitoring,
+            "Current Time": self.current_time,
+            "Remaining Time": self.remaining_time
         }
         return host_obs, aux_obs
 
