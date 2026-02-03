@@ -475,14 +475,134 @@ class NASimEnv(gym.Env):
             numpy vector of 1's and 0's, one for each action. Where an
             index will be 1 if action is valid given current state, or
             0 if action is invalid.
+            
+        Notes
+        -----
+        This method implements intelligent action masking to avoid:
+        - Scanning undiscovered hosts (except subnet scans)
+        - Redundant scans (when info is already known)
+        - Exploits/PrivEsc when preconditions aren't met
+        - Actions targeting isolated hosts
         """
         assert isinstance(self.action_space, FlatActionSpace), \
             "Can only use action mask function when using flat action space"
         mask = np.zeros(self.action_space.n, dtype=np.int64)
+        
         for a_idx in range(self.action_space.n):
             action = self.action_space.get_action(a_idx)
-            if self.network.host_discovered(action.target):
+            target = action.target
+            
+            # Check if host is isolated (blocked by response system)
+            if target in self.network.isolated_hosts:
+                continue
+            
+            # Get target host state
+            host = self.current_state.get_host(target)
+            discovered = bool(host.discovered)
+            reachable = bool(host.reachable)
+            compromised = bool(host.compromised)
+            access_level = int(host.access)
+            
+            # Rule 1: Subnet scans can always be performed on reachable addresses
+            if action.is_subnet_scan():
+                if reachable:
+                    mask[a_idx] = 1
+                continue
+            
+            # Rule 2: All other actions require host to be discovered
+            if not discovered:
+                continue
+            
+            # Rule 3: Service scans - only if host not compromised yet
+            # (if compromised, we already know services)
+            if action.is_service_scan():
+                if not compromised:
+                    # Check if we already know about services
+                    services = host.services
+                    has_known_services = any(v > 0 for v in services.values())
+                    # Allow scan if no services known yet, or host might have more
+                    if not has_known_services or not compromised:
+                        mask[a_idx] = 1
+                continue
+            
+            # Rule 4: OS scans - only if we don't know OS yet
+            if action.is_os_scan():
+                if not compromised:
+                    # Check if OS is known
+                    os_info = host.os
+                    has_known_os = any(v > 0 for v in os_info.values())
+                    if not has_known_os:
+                        mask[a_idx] = 1
+                continue
+            
+            # Rule 5: Process scans - only if host is compromised
+            if action.is_process_scan():
+                if compromised and access_level >= action.req_access:
+                    # Check if we already know about processes
+                    processes = host.processes
+                    has_known_processes = any(v > 0 for v in processes.values())
+                    # Allow scan if no processes known yet
+                    if not has_known_processes:
+                        mask[a_idx] = 1
+                continue
+            
+            # Rule 6: Exploits - need host discovered, not already fully compromised
+            if action.is_exploit():
+                # Don't exploit if already have ROOT access
+                if access_level >= 2:  # ROOT_ACCESS = 2
+                    continue
+                    
+                # Check if we have remote access (need at least one compromised host)
+                has_pivot = any(
+                    self.current_state.host_compromised(addr) 
+                    for addr in self.network.address_space
+                )
+                if not has_pivot and target != (1, 0):  # Allow attack on internet-facing hosts
+                    continue
+                
+                # Check if exploit matches known services (if services are known)
+                if hasattr(action, 'service'):
+                    services = host.services
+                    has_known_services = any(v > 0 for v in services.values())
+                    if has_known_services:
+                        # Only allow exploit if target service is running
+                        if not host.is_running_service(action.service):
+                            continue
+                
                 mask[a_idx] = 1
+                continue
+            
+            # Rule 7: Privilege escalation - need host compromised, not already ROOT
+            if action.is_privilege_escalation():
+                if not compromised:
+                    continue
+                if access_level >= 2:  # Already ROOT
+                    continue
+                if access_level < action.req_access:
+                    continue
+                
+                # Check if privesc matches known processes (if processes are known)
+                if hasattr(action, 'process'):
+                    processes = host.processes
+                    has_known_processes = any(v > 0 for v in processes.values())
+                    if has_known_processes:
+                        # Only allow privesc if target process is running
+                        if not host.is_running_process(action.process):
+                            continue
+                
+                mask[a_idx] = 1
+                continue
+        
+        # Ensure at least one action is valid (fallback to subnet scans)
+        if mask.sum() == 0:
+            # Enable all subnet scans for reachable hosts
+            for a_idx in range(self.action_space.n):
+                action = self.action_space.get_action(a_idx)
+                if action.is_subnet_scan():
+                    host = self.current_state.get_host(action.target)
+                    if bool(host.reachable):
+                        mask[a_idx] = 1
+        
         return mask
 
     def get_score_upper_bound(self):

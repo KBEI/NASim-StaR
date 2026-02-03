@@ -97,11 +97,22 @@ class DQN(nn.Module):
     def load_DQN(self, file_path):
         self.load_state_dict(torch.load(file_path))
 
-    def get_action(self, x):
+    def get_action(self, x, action_mask=None):
         with torch.no_grad():
             if len(x.shape) == 1:
                 x = x.view(1, -1)
-            return self.forward(x).max(1)[1]
+            q_values = self.forward(x)
+            
+            # Apply action mask if provided
+            if action_mask is not None:
+                if isinstance(action_mask, np.ndarray):
+                    action_mask = torch.from_numpy(action_mask).to(q_values.device)
+                if len(action_mask.shape) == 1:
+                    action_mask = action_mask.view(1, -1)
+                # Set masked actions to very large negative value
+                q_values = q_values.masked_fill(action_mask == 0, float('-inf'))
+            
+            return q_values.max(1)[1]
 
 
 class DQNAgent:
@@ -190,11 +201,43 @@ class DQNAgent:
             return self.epsilon_schedule[self.steps_done]
         return self.final_epsilon
 
-    def get_egreedy_action(self, o, epsilon):
+    def get_egreedy_action(self, o, epsilon, action_mask=None):
+        """Select action using epsilon-greedy policy with optional action masking.
+        
+        Parameters
+        ----------
+        o : np.ndarray
+            Current observation
+        epsilon : float
+            Exploration probability
+        action_mask : np.ndarray, optional
+            Binary mask of valid actions (1=valid, 0=invalid)
+            
+        Returns
+        -------
+        int
+            Selected action index
+        """
+        # Get action mask if not provided
+        if action_mask is None and hasattr(self.env, 'get_action_mask'):
+            action_mask = self.env.get_action_mask()
+        
+        # Ensure at least one valid action
+        if action_mask is not None and action_mask.sum() == 0:
+            # If no valid actions, allow all actions as fallback
+            action_mask = np.ones(self.num_actions, dtype=np.int64)
+        
         if random.random() > epsilon:
+            # Exploitation: choose best valid action
             o = torch.from_numpy(o).float().to(self.device)
-            return self.dqn.get_action(o).cpu().item()
-        return random.randint(0, self.num_actions-1)
+            return self.dqn.get_action(o, action_mask).cpu().item()
+        else:
+            # Exploration: choose random valid action
+            if action_mask is not None:
+                valid_actions = np.where(action_mask == 1)[0]
+                if len(valid_actions) > 0:
+                    return np.random.choice(valid_actions)
+            return random.randint(0, self.num_actions-1)
 
     def optimize(self):
         batch = self.replay.sample_batch(self.batch_size)
@@ -207,6 +250,10 @@ class DQNAgent:
         # get target q val = max val of next state
         with torch.no_grad():
             target_q_val_raw = self.target_dqn(next_s_batch)
+            
+            # Note: We don't apply action mask here during training
+            # because we're learning Q-values for all state-action pairs
+            # The mask is only used during action selection
             target_q_val = target_q_val_raw.max(1)[0]
             target = r_batch + self.discount*(1-d_batch)*target_q_val
 
