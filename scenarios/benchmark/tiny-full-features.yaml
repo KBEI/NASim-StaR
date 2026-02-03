@@ -26,19 +26,19 @@ exploits:
   ssh_bruteforce:
     service: ssh
     os: linux
-    prob: 0.4
+    prob: 0.5
     cost: 3
     access: user
   password_spray:
     service: ssh
     os: linux
-    prob: 0.6
+    prob: 0.7
     cost: 2
     access: user
   credential_reuse:
     service: ssh
     os: linux
-    prob: 0.7
+    prob: 0.8
     cost: 1
     access: user
   web_rce:
@@ -50,7 +50,7 @@ exploits:
   anonymous_write:
     service: ftp
     os: None
-    prob: 0.5
+    prob: 0.6
     cost: 1
     access: user
 privilege_escalation:
@@ -138,31 +138,23 @@ step_limit: 1000
 detection:
   enabled: true
   base_prob:
-    service_scan: 0.2
-    os_scan: 0.15
-    subnet_scan: 0.1
-    process_scan: 0.25
-    exploit: 0.3
-    privilege_escalation: 0.2
+    service_scan: 0.1
+    os_scan: 0.08
+    subnet_scan: 0.05
+    process_scan: 0.12
+    exploit: 0.2
+    privilege_escalation: 0.15
   cost_stealth_factor: 0.2
 
 response:
   enabled: true
-  alert_threshold: 2
+  alert_threshold: 4
   actions:
     - type: increase_monitoring
-      factor: 1.5
-      duration_steps: 5
+      factor: 1.3
+      duration_steps: 3
     - type: isolate_host
   sensitive_isolated_failure: false
-
-honeypots:
-  (1, 0):
-    detection_prob: 0.9
-    force_detected: true
-    fake_services: [ssh]
-    fake_os: linux
-    trigger_response: true
 
 rewards:
   alert_penalty: -1.0
@@ -170,7 +162,7 @@ rewards:
 
 time:
   enabled: true
-  max_time: 120
+  max_time: 150
   action_duration:
     service_scan: 1
     os_scan: 1

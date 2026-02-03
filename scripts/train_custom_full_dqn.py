@@ -150,7 +150,7 @@ def train_collect(env, training_steps, seed, dqn_kwargs, agent_cls):
     return results
 
 
-def save_plots(results_base, results_custom, out_dir):
+def save_plots(results, out_dir, label):
     try:
         import matplotlib.pyplot as plt
     except Exception as exc:
@@ -159,36 +159,28 @@ def save_plots(results_base, results_custom, out_dir):
 
     plt.figure(figsize=(10, 4))
     plt.plot(
-        [ep["episode_return"] for ep in results_base["episodes"]],
-        label="baseline",
-    )
-    plt.plot(
-        [ep["episode_return"] for ep in results_custom["episodes"]],
-        label="custom_full",
+        [ep["episode_return"] for ep in results["episodes"]],
+        label=label,
     )
     plt.xlabel("Episode")
     plt.ylabel("Episode Return")
     plt.title("DQN Training: Returns per Episode")
     plt.legend()
     plt.tight_layout()
-    plt.savefig(os.path.join(out_dir, "returns_compare.png"))
+    plt.savefig(os.path.join(out_dir, "returns.png"))
     plt.close()
 
     plt.figure(figsize=(10, 4))
     plt.plot(
-        [ep["episode_steps"] for ep in results_base["episodes"]],
-        label="baseline",
-    )
-    plt.plot(
-        [ep["episode_steps"] for ep in results_custom["episodes"]],
-        label="custom_full",
+        [ep["episode_steps"] for ep in results["episodes"]],
+        label=label,
     )
     plt.xlabel("Episode")
     plt.ylabel("Episode Steps")
     plt.title("DQN Training: Steps per Episode")
     plt.legend()
     plt.tight_layout()
-    plt.savefig(os.path.join(out_dir, "steps_compare.png"))
+    plt.savefig(os.path.join(out_dir, "steps.png"))
     plt.close()
 
 
@@ -270,36 +262,27 @@ def save_markdown(summary, out_path):
         return lines
 
     lines = [
-        "# DQN Tiny Full Features Comparison Report",
+        "# DQN Custom Scenario Training Report",
         "",
         f"- training_steps: {summary['training_steps']}",
         f"- seed: {summary['seed']}",
-        f"- baseline_scenario: {summary['baseline_scenario']}",
-        f"- custom_scenario: {summary['custom_scenario']}",
+        f"- scenario: {summary['scenario']}",
+        f"- hierarchical: {summary['hierarchical']}",
         "",
         "## Summary",
         "",
-        "| condition | eval_return | eval_steps | eval_goal | avg_return_last10 |",
-        "|---|---:|---:|---|---:|",
+        "| eval_return | eval_steps | eval_goal | avg_return_last10 |",
+        "|---:|---:|---|---:|",
+        (f"| {summary['eval_return']} | {summary['eval_steps']} | "
+         f"{summary['eval_goal']} | {summary['avg_return_last10']:.4f} |"),
+        "",
+        "### Top Actions (last 10 episodes)",
+        "",
     ]
-    for condition in ["baseline", "custom_full"]:
-        data = summary[condition]
-        lines.append(
-            f"| {condition} | {data['eval_return']} | {data['eval_steps']} | "
-            f"{data['eval_goal']} | {data['avg_return_last10']:.4f} |"
-        )
+    for name, count in summary["top_actions_last10"]:
+        lines.append(f"- {name}: {count}")
     lines.append("")
-
-    for condition in ["baseline", "custom_full"]:
-        data = summary[condition]
-        lines.append(f"### {condition} Top Actions (last 10 episodes)")
-        lines.append("")
-        for name, count in data["top_actions_last10"]:
-            lines.append(f"- {name}: {count}")
-        lines.append("")
-
-    lines.extend(_md_best_episode("Baseline", summary["baseline"]["best_episode"]))
-    lines.extend(_md_best_episode("Custom Full", summary["custom_full"]["best_episode"]))
+    lines.extend(_md_best_episode("Best", summary["best_episode"]))
 
     with open(out_path, "w", encoding="utf-8") as f:
         f.write("\n".join(lines))
@@ -307,18 +290,13 @@ def save_markdown(summary, out_path):
 
 def main():
     parser = argparse.ArgumentParser(
-        description="Compare DQN baseline vs tiny full features scenario."
+        description="Train DQN on a single custom scenario."
     )
     parser.add_argument("--training_steps", type=int, default=20000)
     parser.add_argument("--seed", type=int, default=0)
-    parser.add_argument("--out_dir", type=str, default="runs/compare_tiny_full")
+    parser.add_argument("--out_dir", type=str, default="runs/train_custom_full")
     parser.add_argument(
-        "--baseline_scenario",
-        type=str,
-        default=os.path.join("scenarios", "benchmark", "tiny.yaml"),
-    )
-    parser.add_argument(
-        "--custom_scenario",
+        "--scenario",
         type=str,
         default=os.path.join(
             "scenarios", "benchmark", "tiny-full-features.yaml"
@@ -345,39 +323,18 @@ def main():
         verbose=True,
     )
 
-    baseline_path = os.path.join(repo_root, args.baseline_scenario)
-    custom_path = os.path.join(repo_root, args.custom_scenario)
-
-    env_baseline = nasim.load(
-        baseline_path,
+    scenario_path = os.path.join(repo_root, args.scenario)
+    env = nasim.load(
+        scenario_path,
         fully_obs=True,
         flat_actions=True,
         flat_obs=True,
     )
     if args.hierarchical:
-        env_baseline = HierarchicalActionWrapper(env_baseline)
+        env = HierarchicalActionWrapper(env)
 
     agent_cls = HierarchicalDQNAgent if args.hierarchical else DQNAgent
-
-    results_baseline = train_collect(
-        env_baseline, args.training_steps, args.seed, dqn_kwargs, agent_cls
-    )
-
-    # reset HostVector class state before loading next scenario
-    nasim.envs.host_vector.HostVector.reset()
-
-    env_custom = nasim.load(
-        custom_path,
-        fully_obs=True,
-        flat_actions=True,
-        flat_obs=True,
-    )
-    if args.hierarchical:
-        env_custom = HierarchicalActionWrapper(env_custom)
-
-    results_custom = train_collect(
-        env_custom, args.training_steps, args.seed, dqn_kwargs, agent_cls
-    )
+    results = train_collect(env, args.training_steps, args.seed, dqn_kwargs, agent_cls)
 
     timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
     out_dir = os.path.abspath(args.out_dir)
@@ -386,44 +343,23 @@ def main():
     summary = {
         "training_steps": args.training_steps,
         "seed": args.seed,
-        "baseline_scenario": args.baseline_scenario,
-        "custom_scenario": args.custom_scenario,
-        "baseline": {
-            "eval_return": results_baseline["eval_return"],
-            "eval_steps": results_baseline["eval_steps"],
-            "eval_goal": results_baseline["eval_goal"],
-            "avg_return_last10": float(
-                np.mean(
-                    [ep["episode_return"]
-                     for ep in results_baseline["episodes"][-10:]]
-                ) if len(results_baseline["episodes"]) >= 10 else np.mean(
-                    [ep["episode_return"] for ep in results_baseline["episodes"]]
-                )
-            ),
-            "episodes": results_baseline["episodes"],
-            "best_episode": results_baseline["best_episode"],
-            "top_actions_last10": _aggregate_action_name_counts(
-                results_baseline["episodes"], last_n=10
-            ),
-        },
-        "custom_full": {
-            "eval_return": results_custom["eval_return"],
-            "eval_steps": results_custom["eval_steps"],
-            "eval_goal": results_custom["eval_goal"],
-            "avg_return_last10": float(
-                np.mean(
-                    [ep["episode_return"]
-                     for ep in results_custom["episodes"][-10:]]
-                ) if len(results_custom["episodes"]) >= 10 else np.mean(
-                    [ep["episode_return"] for ep in results_custom["episodes"]]
-                )
-            ),
-            "episodes": results_custom["episodes"],
-            "best_episode": results_custom["best_episode"],
-            "top_actions_last10": _aggregate_action_name_counts(
-                results_custom["episodes"], last_n=10
-            ),
-        },
+        "scenario": args.scenario,
+        "hierarchical": bool(args.hierarchical),
+        "eval_return": results["eval_return"],
+        "eval_steps": results["eval_steps"],
+        "eval_goal": results["eval_goal"],
+        "avg_return_last10": float(
+            np.mean(
+                [ep["episode_return"] for ep in results["episodes"][-10:]]
+            ) if len(results["episodes"]) >= 10 else np.mean(
+                [ep["episode_return"] for ep in results["episodes"]]
+            )
+        ),
+        "episodes": results["episodes"],
+        "best_episode": results["best_episode"],
+        "top_actions_last10": _aggregate_action_name_counts(
+            results["episodes"], last_n=10
+        ),
     }
 
     json_path = os.path.join(out_dir, f"summary_{timestamp}.json")
@@ -440,20 +376,17 @@ def main():
     os.replace(temp_path, json_path)
 
     if not args.no_plots:
-        save_plots(results_baseline, results_custom, out_dir)
+        save_plots(results, out_dir, label="custom")
 
-    csv_baseline = os.path.join(out_dir, f"episodes_baseline_{timestamp}.csv")
-    csv_custom = os.path.join(out_dir, f"episodes_custom_full_{timestamp}.csv")
-    save_csv(results_baseline, "baseline", csv_baseline)
-    save_csv(results_custom, "custom_full", csv_custom)
+    csv_path = os.path.join(out_dir, f"episodes_custom_{timestamp}.csv")
+    save_csv(results, "custom", csv_path)
 
     md_path = os.path.join(out_dir, f"report_{timestamp}.md")
     save_markdown(summary, md_path)
 
     print(json.dumps(summary, indent=2))
     print(f"\nSaved summary to: {json_path}")
-    print(f"Saved CSV to: {csv_baseline}")
-    print(f"Saved CSV to: {csv_custom}")
+    print(f"Saved CSV to: {csv_path}")
     print(f"Saved report to: {md_path}")
     if not args.no_plots:
         print(f"Saved plots to: {out_dir}")
