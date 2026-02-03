@@ -271,6 +271,10 @@ class Scenario:
         return self.scenario_dict[u.PROCESS_SCAN_COST]
 
     @property
+    def scan_actions(self):
+        return self.scenario_dict.get(u.SCAN_ACTIONS, {})
+
+    @property
     def address_space_bounds(self):
         return self.scenario_dict.get(
             u.ADDRESS_SPACE_BOUNDS, (len(self.subnets), max(self.subnets))
@@ -314,10 +318,32 @@ class Scenario:
     def get_action_space_size(self):
         num_exploits = len(self.exploits)
         num_privescs = len(self.privescs)
-        # OSScan, ServiceScan, SubnetScan, ProcessScan
-        num_scans = 4
+        num_scans = self._get_scan_action_count()
         actions_per_host = num_exploits + num_privescs + num_scans
         return len(self.hosts) * actions_per_host
+
+    def _get_scan_action_count(self):
+        if not self.scan_actions:
+            return 4
+        count = 0
+        for scan_type in [
+                "service_scan",
+                "os_scan",
+                "subnet_scan",
+                "process_scan"
+        ]:
+            actions = self.scan_actions.get(scan_type, [])
+            count += len(actions) if actions else 1
+        return count
+
+    def get_scan_action_defs(self, scan_type):
+        return list(self.scan_actions.get(scan_type, []))
+
+    def get_scan_action_default(self, scan_type):
+        actions = self.scan_actions.get(scan_type, [])
+        if actions:
+            return dict(actions[0])
+        return None
 
     def get_state_space_size(self):
         # compromised, reachable, discovered

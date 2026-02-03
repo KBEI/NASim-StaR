@@ -32,7 +32,8 @@ OPTIONAL_CONFIG_KEYS = {
     u.RESPONSE: dict,
     u.HONEYPOTS: dict,
     u.REWARDS: dict,
-    u.TIME: dict
+    u.TIME: dict,
+    u.SCAN_ACTIONS: dict
 }
 
 VALID_ACCESS_VALUES = ["user", "root", u.USER_ACCESS, u.ROOT_ACCESS]
@@ -106,6 +107,7 @@ class ScenarioLoader:
         self._parse_exploits()
         self._parse_privescs()
         self._parse_scan_costs()
+        self._parse_scan_actions()
         self._parse_host_configs()
         self._parse_firewall()
         self._parse_hosts()
@@ -131,6 +133,7 @@ class ScenarioLoader:
         scenario_dict[u.SERVICE_SCAN_COST] = self.service_scan_cost
         scenario_dict[u.SUBNET_SCAN_COST] = self.subnet_scan_cost
         scenario_dict[u.PROCESS_SCAN_COST] = self.process_scan_cost
+        scenario_dict[u.SCAN_ACTIONS] = self.scan_actions
         scenario_dict[u.FIREWALL] = self.firewall
         scenario_dict[u.HOSTS] = self.hosts
         scenario_dict[u.STEP_LIMIT] = self.step_limit
@@ -398,6 +401,82 @@ class ScenarioLoader:
 
     def _validate_scan_cost(self, scan_name, scan_cost):
         assert scan_cost >= 0, f"{scan_name} Scan Cost must be >= 0."
+
+    def _parse_scan_actions(self):
+        scan_actions = self.yaml_dict.get(u.SCAN_ACTIONS, None)
+        if scan_actions is None:
+            self.scan_actions = {}
+            return
+        self._validate_scan_actions(scan_actions)
+        self.scan_actions = self._normalize_scan_actions(scan_actions)
+
+    def _validate_scan_actions(self, scan_actions):
+        assert isinstance(scan_actions, dict), \
+            f"{u.SCAN_ACTIONS} must be a dict"
+        valid_scan_types = {
+            "service_scan",
+            "os_scan",
+            "subnet_scan",
+            "process_scan"
+        }
+        for scan_type, actions in scan_actions.items():
+            assert scan_type in valid_scan_types, \
+                (f"Invalid scan action type: {scan_type}. "
+                 f"Must be one of {sorted(valid_scan_types)}")
+            assert isinstance(actions, list), \
+                f"{u.SCAN_ACTIONS}.{scan_type} must be a list"
+            names = set()
+            for action_def in actions:
+                assert isinstance(action_def, dict), \
+                    f"{u.SCAN_ACTIONS}.{scan_type} entries must be dicts"
+                assert u.SCAN_ACTION_NAME in action_def, \
+                    f"{u.SCAN_ACTIONS}.{scan_type} missing '{u.SCAN_ACTION_NAME}'"
+                assert u.SCAN_ACTION_COST in action_def, \
+                    f"{u.SCAN_ACTIONS}.{scan_type} missing '{u.SCAN_ACTION_COST}'"
+                name = action_def[u.SCAN_ACTION_NAME]
+                assert isinstance(name, str) and name, \
+                    f"{u.SCAN_ACTIONS}.{scan_type} name must be non-empty str"
+                assert name not in names, \
+                    (f"Duplicate scan action name '{name}' in "
+                     f"{u.SCAN_ACTIONS}.{scan_type}")
+                names.add(name)
+
+                cost = action_def[u.SCAN_ACTION_COST]
+                assert isinstance(cost, (int, float)) and cost >= 0, \
+                    f"{u.SCAN_ACTIONS}.{scan_type}.{name} cost must be >= 0"
+
+                prob = action_def.get(u.SCAN_ACTION_PROB, 1.0)
+                assert isinstance(prob, (int, float)), \
+                    f"{u.SCAN_ACTIONS}.{scan_type}.{name} prob must be numeric"
+                assert 0.0 <= prob <= 1.0, \
+                    f"{u.SCAN_ACTIONS}.{scan_type}.{name} prob must be [0, 1]"
+
+                if u.SCAN_ACTION_REQ_ACCESS in action_def:
+                    req_access = action_def[u.SCAN_ACTION_REQ_ACCESS]
+                    assert req_access in VALID_ACCESS_VALUES, \
+                        (f"{u.SCAN_ACTIONS}.{scan_type}.{name} req_access "
+                         f"invalid. Must be one of {VALID_ACCESS_VALUES}")
+
+                if u.SCAN_ACTION_DURATION in action_def:
+                    duration = action_def[u.SCAN_ACTION_DURATION]
+                    assert isinstance(duration, int) and duration >= 0, \
+                        (f"{u.SCAN_ACTIONS}.{scan_type}.{name} duration "
+                         "must be int >= 0")
+
+    def _normalize_scan_actions(self, scan_actions):
+        normalized = {}
+        for scan_type, actions in scan_actions.items():
+            norm_actions = []
+            for action_def in actions:
+                action_copy = dict(action_def)
+                if u.SCAN_ACTION_REQ_ACCESS in action_copy \
+                   and isinstance(action_copy[u.SCAN_ACTION_REQ_ACCESS], str):
+                    action_copy[u.SCAN_ACTION_REQ_ACCESS] = ACCESS_LEVEL_MAP[
+                        action_copy[u.SCAN_ACTION_REQ_ACCESS]
+                    ]
+                norm_actions.append(action_copy)
+            normalized[scan_type] = norm_actions
+        return normalized
 
     def _parse_host_configs(self):
         self.host_configs = self.yaml_dict[u.HOST_CONFIGS]

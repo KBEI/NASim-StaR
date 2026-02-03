@@ -1,0 +1,181 @@
+# A small network configuration with multi-variant actions
+#
+# 4 subnets
+# 8 hosts
+# 2 OS
+# 4 services (ssh, ftp, http, smb)
+# 2 processes
+# 6 exploits
+# 4 priv esc
+#
+subnets: [1, 1, 5, 1]
+topology: [[ 1, 1, 0, 0, 0],
+           [ 1, 1, 1, 1, 0],
+           [ 0, 1, 1, 1, 0],
+           [ 0, 1, 1, 1, 1],
+           [ 0, 0, 0, 1, 1]]
+sensitive_hosts:
+  (2, 0): 100
+  (4, 0): 100
+os:
+  - linux
+  - windows
+services:
+  - ssh
+  - ftp
+  - http
+  - smb
+processes:
+  - tomcat
+  - daclsvc
+exploits:
+  ssh_bruteforce:
+    service: ssh
+    os: linux
+    prob: 0.4
+    cost: 3
+    access: user
+  password_spray:
+    service: ssh
+    os: linux
+    prob: 0.6
+    cost: 2
+    access: user
+  credential_reuse:
+    service: ssh
+    os: linux
+    prob: 0.7
+    cost: 1
+    access: user
+  web_rce:
+    service: http
+    os: None
+    prob: 0.8
+    cost: 2
+    access: user
+  smb_rce:
+    service: smb
+    os: windows
+    prob: 0.7
+    cost: 3
+    access: user
+  anonymous_write:
+    service: ftp
+    os: None
+    prob: 0.5
+    cost: 1
+    access: user
+privilege_escalation:
+  sudo_misconfig:
+    process: tomcat
+    os: linux
+    prob: 0.8
+    cost: 1
+    access: root
+  kernel_privesc:
+    process: tomcat
+    os: linux
+    prob: 0.6
+    cost: 2
+    access: root
+  service_token_abuse:
+    process: daclsvc
+    os: windows
+    prob: 0.7
+    cost: 2
+    access: root
+  weak_service_permissions:
+    process: daclsvc
+    os: windows
+    prob: 0.75
+    cost: 1
+    access: root
+service_scan_cost: 1
+os_scan_cost: 1
+subnet_scan_cost: 1
+process_scan_cost: 1
+scan_actions:
+  service_scan:
+    - name: port_scan
+      cost: 1
+      prob: 1.0
+      duration: 1
+    - name: banner_grab
+      cost: 1
+      prob: 1.0
+      duration: 1
+    - name: version_probe
+      cost: 2
+      prob: 1.0
+      duration: 2
+    - name: web_content_enum
+      cost: 2
+      prob: 1.0
+      duration: 2
+  os_scan:
+    - name: os_fingerprint
+      cost: 1
+      prob: 1.0
+      duration: 1
+  subnet_scan:
+    - name: host_discovery
+      cost: 1
+      prob: 1.0
+      duration: 1
+  process_scan:
+    - name: process_enum
+      cost: 2
+      prob: 1.0
+      duration: 2
+    - name: software_enum
+      cost: 2
+      prob: 1.0
+      duration: 2
+host_configurations:
+  (1, 0):
+    os: linux
+    services: [http]
+    processes: []
+  (2, 0):
+    os: linux
+    services: [ssh, ftp]
+    processes: [tomcat]
+  (3, 0):
+    os: windows
+    services: [ftp, smb]
+    processes: []
+  (3, 1):
+    os: windows
+    services: [ftp, http, smb]
+    processes: [daclsvc]
+  (3, 2):
+    os: windows
+    services: [ftp, smb]
+    processes: [daclsvc]
+  (3, 3):
+    os: windows
+    services: [ftp, smb]
+    processes: []
+  (3, 4):
+    os: windows
+    services: [ftp, smb]
+    processes: [daclsvc]
+  (4, 0):
+    os: linux
+    services: [ssh, ftp]
+    processes: [tomcat]
+# two row for each connection between subnets as defined by topology
+# one for each direction of connection
+# list which services to allow
+firewall:
+  (0, 1): [http]
+  (1, 0): []
+  (1, 2): [ssh]
+  (2, 1): [ssh]
+  (1, 3): []
+  (3, 1): [ssh]
+  (2, 3): [http, smb]
+  (3, 2): [ftp, smb]
+  (3, 4): [ssh, ftp, smb]
+  (4, 3): [ftp, smb]
+step_limit: 1000

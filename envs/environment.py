@@ -260,6 +260,8 @@ class NASimEnv(gym.Env):
         return next_state, obs, reward, done, action_obs.info()
 
     def _get_action_duration(self, action):
+        if getattr(action, "duration", None) is not None:
+            return action.duration
         duration_map = self.scenario.action_duration_map
         if action.is_service_scan():
             return duration_map.get("service_scan", 1)

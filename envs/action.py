@@ -54,19 +54,24 @@ def load_action_list(scenario):
         list of all actions in environment
     """
     action_list = []
+    scan_action_map = {
+        "service_scan": (ServiceScan, scenario.service_scan_cost),
+        "os_scan": (OSScan, scenario.os_scan_cost),
+        "subnet_scan": (SubnetScan, scenario.subnet_scan_cost),
+        "process_scan": (ProcessScan, scenario.process_scan_cost)
+    }
     for address in scenario.address_space:
-        action_list.append(
-            ServiceScan(address, scenario.service_scan_cost)
-        )
-        action_list.append(
-            OSScan(address, scenario.os_scan_cost)
-        )
-        action_list.append(
-            SubnetScan(address, scenario.subnet_scan_cost)
-        )
-        action_list.append(
-            ProcessScan(address, scenario.process_scan_cost)
-        )
+        for scan_type, (scan_class, default_cost) in scan_action_map.items():
+            scan_defs = scenario.get_scan_action_defs(scan_type)
+            if scan_defs:
+                for scan_def in scan_defs:
+                    action_list.append(
+                        scan_class(target=address, **scan_def)
+                    )
+            else:
+                action_list.append(
+                    scan_class(target=address, cost=default_cost)
+                )
         for e_name, e_def in scenario.exploits.items():
             exploit = Exploit(e_name, address, **e_def)
             action_list.append(exploit)
@@ -114,6 +119,7 @@ class Action:
                  cost,
                  prob=1.0,
                  req_access=AccessLevel.USER,
+                 duration=None,
                  **kwargs):
         """
         Parameters
@@ -136,6 +142,7 @@ class Action:
         self.cost = cost
         self.prob = prob
         self.req_access = req_access
+        self.duration = duration
 
     def is_exploit(self):
         """Check if action is an exploit
@@ -232,10 +239,12 @@ class Action:
 
     def __str__(self):
         return (f"{self.__class__.__name__}: "
+                f"name={self.name}, "
                 f"target={self.target}, "
                 f"cost={self.cost:.2f}, "
                 f"prob={self.prob:.2f}, "
-                f"req_access={self.req_access}")
+                f"req_access={self.req_access}, "
+                f"duration={self.duration}")
 
     def __hash__(self):
         return hash(self.__str__())
@@ -247,10 +256,13 @@ class Action:
             return False
         if self.target != other.target:
             return False
+        if self.name != other.name:
+            return False
         if not (math.isclose(self.cost, other.cost)
                 and math.isclose(self.prob, other.prob)):
             return False
-        return self.req_access == other.req_access
+        return self.req_access == other.req_access \
+            and self.duration == other.duration
 
 
 class Exploit(Action):
@@ -279,6 +291,7 @@ class Exploit(Action):
                  access=0,
                  prob=1.0,
                  req_access=AccessLevel.USER,
+                 duration=None,
                  **kwargs):
         """
         Parameters
@@ -304,7 +317,8 @@ class Exploit(Action):
                          target=target,
                          cost=cost,
                          prob=prob,
-                         req_access=req_access)
+                         req_access=req_access,
+                         duration=duration)
         self.os = os
         self.service = service
         self.access = access
@@ -349,6 +363,7 @@ class PrivilegeEscalation(Action):
                  os=None,
                  prob=1.0,
                  req_access=AccessLevel.USER,
+                 duration=None,
                  **kwargs):
         """
         Parameters
@@ -375,7 +390,8 @@ class PrivilegeEscalation(Action):
                          target=target,
                          cost=cost,
                          prob=prob,
-                         req_access=req_access)
+                         req_access=req_access,
+                         duration=duration)
         self.access = access
         self.os = os
         self.process = process
@@ -401,8 +417,10 @@ class ServiceScan(Action):
     def __init__(self,
                  target,
                  cost,
+                 name="service_scan",
                  prob=1.0,
                  req_access=AccessLevel.USER,
+                 duration=None,
                  **kwargs):
         """
         Parameters
@@ -417,11 +435,12 @@ class ServiceScan(Action):
             the required access level to perform action
             (default=AccessLevel.USER)
         """
-        super().__init__("service_scan",
+        super().__init__(name,
                          target=target,
                          cost=cost,
                          prob=prob,
                          req_access=req_access,
+                         duration=duration,
                          **kwargs)
 
 
@@ -434,8 +453,10 @@ class OSScan(Action):
     def __init__(self,
                  target,
                  cost,
+                 name="os_scan",
                  prob=1.0,
                  req_access=AccessLevel.USER,
+                 duration=None,
                  **kwargs):
         """
         Parameters
@@ -450,11 +471,12 @@ class OSScan(Action):
             the required access level to perform action
             (default=AccessLevel.USER)
         """
-        super().__init__("os_scan",
+        super().__init__(name,
                          target=target,
                          cost=cost,
                          prob=prob,
                          req_access=req_access,
+                         duration=duration,
                          **kwargs)
 
 
@@ -467,8 +489,10 @@ class SubnetScan(Action):
     def __init__(self,
                  target,
                  cost,
+                 name="subnet_scan",
                  prob=1.0,
                  req_access=AccessLevel.USER,
+                 duration=None,
                  **kwargs):
         """
         Parameters
@@ -483,11 +507,12 @@ class SubnetScan(Action):
             the required access level to perform action
             (default=AccessLevel.USER)
         """
-        super().__init__("subnet_scan",
+        super().__init__(name,
                          target=target,
                          cost=cost,
                          prob=prob,
                          req_access=req_access,
+                         duration=duration,
                          **kwargs)
 
 
@@ -500,8 +525,10 @@ class ProcessScan(Action):
     def __init__(self,
                  target,
                  cost,
+                 name="process_scan",
                  prob=1.0,
                  req_access=AccessLevel.USER,
+                 duration=None,
                  **kwargs):
         """
         Parameters
@@ -516,11 +543,12 @@ class ProcessScan(Action):
             the required access level to perform action
             (default=AccessLevel.USER)
         """
-        super().__init__("process_scan",
+        super().__init__(name,
                          target=target,
                          cost=cost,
                          prob=prob,
                          req_access=req_access,
+                         duration=duration,
                          **kwargs)
 
 
@@ -847,15 +875,23 @@ class ParameterisedActionSpace(spaces.MultiDiscrete):
     def _get_scan_action_def(self, a_class):
         """Get the constants for scan actions definitions """
         if a_class == ServiceScan:
+            scan_type = "service_scan"
             cost = self.scenario.service_scan_cost
         elif a_class == OSScan:
+            scan_type = "os_scan"
             cost = self.scenario.os_scan_cost
         elif a_class == SubnetScan:
+            scan_type = "subnet_scan"
             cost = self.scenario.subnet_scan_cost
         elif a_class == ProcessScan:
+            scan_type = "process_scan"
             cost = self.scenario.process_scan_cost
         else:
             raise TypeError(f"Not implemented for Action class {a_class}")
+
+        default_def = self.scenario.get_scan_action_default(scan_type)
+        if default_def is not None:
+            return default_def
         return {"cost": cost}
 
     def _get_exploit_def(self, service, os):
